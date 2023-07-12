@@ -133,6 +133,8 @@ module "iam_policy" {
 module "iam_assumable_role" {
   source = "terraform-aws-modules/iam/aws//modules/iam-assumable-role"
 
+  trusted_role_services = ["kafkaconnect.amazonaws.com"]
+
   create_role = true
 
   role_name         = "debezium"
@@ -154,42 +156,32 @@ resource "aws_mskconnect_connector" "debezium_mysql" {
   kafkaconnect_version = "2.7.1"
 
   capacity {
-    autoscaling {
-      mcu_count        = 1
-      min_worker_count = 1
-      max_worker_count = 2
-
-      scale_in_policy {
-        cpu_utilization_percentage = 20
-      }
-
-      scale_out_policy {
-        cpu_utilization_percentage = 80
-      }
+    provisioned_capacity {
+      worker_count = 1
     }
   }
 
   connector_configuration = {
-    name                                          = "mysql-connector"
-    connector_class                               = "io.debezium.connector.mysql.MySqlConnector"
-    database_hostname                             = module.db.db_instance_address
-    database_port                                 = 3306
-    database_user                                 = module.db.db_instance_username
-    database_password                             = module.db.db_instance_master_user_secret_arn
-    database_server_name                          = module.db.db_instance_name
-    database_history_kafka_bootstrap_servers      = module.msk_cluster.bootstrap_brokers_tls
-    database_history_kafka_topic                  = "dbhistory.demo1"
-    key_converter                                 = "com.amazonaws.services.schemaregistry.kafkaconnect.AWSKafkaAvroConverter"
-    value_converter                               = "com.amazonaws.services.schemaregistry.kafkaconnect.AWSKafkaAvroConverter"
-    key_converter_region                          = local.region
-    value_converter_region                        = local.region
-    key_converter_registry_name                   = module.msk_cluster.schema_registries.debezium.registry_name
-    value_converter_registry_name                 = module.msk_cluster.schema_registries.debezium.registry_name
-    key_converter_compatibility                   = "FORWARD"
-    value_converter_compatibility                 = "FORWARD"
-    key_converter_schemaAutoRegistrationEnabled   = true
-    value_converter_schemaAutoRegistrationEnabled = true
-    tasks_max                                     = 1
+    "name"                                          = local.name
+    "connector.class"                               = "io.debezium.connector.mysql.MySqlConnector"
+    "database.hostname"                             = module.db.db_instance_address
+    "database.port"                                 = 3306
+    "database.user"                                 = module.db.db_instance_username
+    "database.password"                             = module.db.db_instance_master_user_secret_arn
+    "database.server_name"                          = module.db.db_instance_name
+    "database.history.kafka.bootstrap.servers"      = module.msk_cluster.bootstrap_brokers_tls
+    "database.history.kafka.topic"                  = "dbhistory.debezium"
+    "key.converter"                                 = "com.amazonaws.services.schemaregistry.kafkaconnect.AWSKafkaAvroConverter"
+    "value.converter"                               = "com.amazonaws.services.schemaregistry.kafkaconnect.AWSKafkaAvroConverter"
+    "key.converter.region"                          = local.region
+    "value.converter.region"                        = local.region
+    "key.converter.registry.name"                   = module.msk_cluster.schema_registries.debezium.registry_name
+    "value.converter.registry.name"                 = module.msk_cluster.schema_registries.debezium.registry_name
+    "key.converter.compatibility"                   = "FORWARD"
+    "value.converter.compatibility"                 = "FORWARD"
+    "key.converter.schemaAutoRegistrationEnabled"   = true
+    "value.converter.schemaAutoRegistrationEnabled" = true
+    "tasks.max"                                     = 1
   }
 
   kafka_cluster {
@@ -197,8 +189,8 @@ resource "aws_mskconnect_connector" "debezium_mysql" {
       bootstrap_servers = module.msk_cluster.bootstrap_brokers_tls
 
       vpc {
-        security_groups = [module.security_group.security_group_id, module.security_group_database.security_group_id]
-        subnets         = [join(",", module.vpc.private_subnets), module.vpc.database_subnet_group]
+        security_groups = [module.security_group.security_group_id]
+        subnets         = module.vpc.public_subnets
       }
     }
   }
