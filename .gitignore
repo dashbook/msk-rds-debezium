@@ -1,3 +1,7 @@
 *.tfstate
 *.tfstate.*
 *.tfvars
+.terraform
+.terraform.lock.hcl
+
+debezium-connector-mysql

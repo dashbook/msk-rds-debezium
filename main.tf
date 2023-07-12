@@ -94,7 +94,7 @@ module "msk_cluster" {
     key.converter=org.apache.kafka.connect.storage.StringConverter
     value.converter=org.apache.kafka.connect.storage.StringConverter
   EOT
-  
+
   schema_registries = {
     debezium = {
       name        = "debezium"
@@ -105,7 +105,44 @@ module "msk_cluster" {
   tags = local.tags
 }
 
+################################################################################
+# IAM Role
+################################################################################
 
+module "iam_policy" {
+  source = "terraform-aws-modules/iam/aws//modules/iam-policy"
+
+  name        = "example"
+  path        = "/"
+  description = "My example policy"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "rds-db:connect"
+        ]
+        Resource = module.db.db_instance_arn
+      }
+    ]
+  })
+}
+
+module "iam_assumable_role" {
+  source = "terraform-aws-modules/iam/aws//modules/iam-assumable-role"
+
+  create_role = true
+
+  role_name         = "debezium"
+  role_requires_mfa = false
+
+  custom_role_policy_arns = [
+    module.iam_policy.arn,
+  ]
+  number_of_custom_role_policy_arns = 1
+}
 
 ################################################################################
 # Connector
@@ -133,53 +170,35 @@ resource "aws_mskconnect_connector" "debezium_mysql" {
   }
 
   connector_configuration = {
-    "name": "database_connector",
-    "topic.prefix": "sample",
-    "connector.class": "io.debezium.connector.mysql.MySqlConnector",
-    "database.server.id": "1",
-    "tasks.max": "1",
-    "database.history.kafka.bootstrap.servers": "[KAFKA_BROKERS]",
-    "database.history.kafka.topic": "database_connector.mysql",
-    "database.server.name": "mysql",
-    "database.hostname": "[DATABASE_HOST]",
-    "database.port": "3306",
-    "database.user": "[DATABASE_USERNAME]",
-    "database.password": "[DATABASE_PASSWORD]",
-    "database.whitelist": "[DATABASE_SCHEMA]",
-    "table.include.list": "[DATABASE_SCHEMA].users,[DATABASE_SCHEMA].products,[DATABASE_SCHEMA].purchases",
-    "internal.key.converter.schemas.enable": "false",
-    "transforms.unwrap.add.source.fields": "ts_ms",
-    "key.converter.schemas.enable": "false",
-    "internal.key.converter": "org.apache.kafka.connect.json.JsonConverter",
-    "internal.value.converter.schemas.enable": "false",
-    "value.converter.schemas.enable": "false",
-    "internal.value.converter": "org.apache.kafka.connect.json.JsonConverter",
-    "transforms": "unwrap",
-    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
-    "schema.history.internal.kafka.topic": "schemahistory.fullfillment",
-    "schema.history.internal.kafka.bootstrap.servers": "[KAFKA_BROKERS]",
-    "errors.log.enable": "true",
-    "snapshot.mode": "when_needed",
-    "key.converter": "io.apicurio.registry.utils.converter.AvroConverter",
-    "key.converter.apicurio.registry.url": "http://localhost:8080/apis/registry/v2",
-    "key.converter.apicurio.registry.auto-register": "true",
-    "key.converter.apicurio.registry.find-latest": "true",
-    "value.converter": "io.apicurio.registry.utils.converter.AvroConverter",
-    "value.converter.apicurio.registry.url": "http://localhost:8080/apis/registry/v2",
-    "value.converter.apicurio.registry.auto-register": "true",
-    "value.converter.apicurio.registry.find-latest": "true",
-    "value.converter.apicurio.registry.as-confluent": "true",
-    "value.converter.apicurio.registry.use-id": "contentId",
-    "schema.name.adjustment.mode": "avro"
+    name                                          = "mysql-connector"
+    connector_class                               = "io.debezium.connector.mysql.MySqlConnector"
+    database_hostname                             = module.db.db_instance_address
+    database_port                                 = 3306
+    database_user                                 = module.db.db_instance_username
+    database_password                             = module.db.db_instance_master_user_secret_arn
+    database_server_name                          = module.db.db_instance_name
+    database_history_kafka_bootstrap_servers      = module.msk_cluster.bootstrap_brokers_tls
+    database_history_kafka_topic                  = "dbhistory.demo1"
+    key_converter                                 = "com.amazonaws.services.schemaregistry.kafkaconnect.AWSKafkaAvroConverter"
+    value_converter                               = "com.amazonaws.services.schemaregistry.kafkaconnect.AWSKafkaAvroConverter"
+    key_converter_region                          = local.region
+    value_converter_region                        = local.region
+    key_converter_registry_name                   = module.msk_cluster.schema_registries.debezium.registry_name
+    value_converter_registry_name                 = module.msk_cluster.schema_registries.debezium.registry_name
+    key_converter_compatibility                   = "FORWARD"
+    value_converter_compatibility                 = "FORWARD"
+    key_converter_schemaAutoRegistrationEnabled   = true
+    value_converter_schemaAutoRegistrationEnabled = true
+    tasks_max                                     = 1
   }
 
   kafka_cluster {
     apache_kafka_cluster {
-      bootstrap_servers = module.msk_cluster
+      bootstrap_servers = module.msk_cluster.bootstrap_brokers_tls
 
       vpc {
         security_groups = [module.security_group.security_group_id, module.security_group_database.security_group_id]
-        subnets         = [module.vpc.private_subnet_group]
+        subnets         = [join(",", module.vpc.private_subnets), module.vpc.database_subnet_group]
       }
     }
   }
@@ -194,12 +213,12 @@ resource "aws_mskconnect_connector" "debezium_mysql" {
 
   plugin {
     custom_plugin {
-      arn      = module.msk_cluster.aws_mskconnect_custom_plugin.arn
-      revision = module.msk_cluster.aws_mskconnect_custom_plugin.latest_revision
+      arn      = module.msk_cluster.connect_custom_plugins.debezium.arn
+      revision = module.msk_cluster.connect_custom_plugins.debezium.latest_revision
     }
   }
 
-  service_execution_role_arn = aws_iam_role.example.arn
+  service_execution_role_arn = module.iam_assumable_role.iam_role_arn
 }
 
 ################################################################################
@@ -271,7 +290,7 @@ module "s3_bucket" {
 
   bucket_prefix = local.name
   acl           = "private"
-  
+
   control_object_ownership = true
   object_ownership         = "ObjectWriter"
 
