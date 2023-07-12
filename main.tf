@@ -37,10 +37,12 @@ module "db" {
   major_engine_version = "8.0"      # DB option group
   instance_class       = "db.t4g.micro"
 
-  allocated_storage = 20
+  allocated_storage           = 20
+  manage_master_user_password = false
 
   db_name  = "completeMysql"
   username = "complete_mysql"
+  password = aws_secretsmanager_secret_version.current.secret_string
   port     = 3306
 
   db_subnet_group_name   = module.vpc.database_subnet_group
@@ -52,6 +54,21 @@ module "db" {
   backup_retention_period = 0
 
   tags = local.tags
+}
+
+resource "random_password" "database_password" {
+  length           = 16
+  special          = true
+  override_special = "!@#$%^&*()_+{}[]:;?/|"
+}
+
+resource "aws_secretsmanager_secret" "database_password" {
+  name = "database_password"
+}
+
+resource "aws_secretsmanager_secret_version" "current" {
+  secret_id     = aws_secretsmanager_secret.database_password.id
+  secret_string = random_password.database_password.result
 }
 
 ################################################################################
@@ -167,7 +184,7 @@ resource "aws_mskconnect_connector" "debezium_mysql" {
     "database.hostname"                             = module.db.db_instance_address
     "database.port"                                 = 3306
     "database.user"                                 = module.db.db_instance_username
-    "database.password"                             = module.db.db_instance_master_user_secret_arn
+    "database.password"                             = aws_secretsmanager_secret_version.current.secret_string
     "database.server_name"                          = module.db.db_instance_name
     "database.history.kafka.bootstrap.servers"      = module.msk_cluster.bootstrap_brokers_tls
     "database.history.kafka.topic"                  = "dbhistory.debezium"
