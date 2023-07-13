@@ -86,6 +86,8 @@ module "msk_cluster" {
   broker_node_instance_type   = "kafka.t3.small"
   broker_node_security_groups = [module.security_group.security_group_id]
 
+  encryption_in_transit_client_broker = "TLS"
+
   # Connect custom plugin(s)
   connect_custom_plugins = {
     debezium = {
@@ -129,7 +131,7 @@ module "msk_cluster" {
 module "iam_policy" {
   source = "terraform-aws-modules/iam/aws//modules/iam-policy"
 
-  name        = "example"
+  name        = local.name
   path        = "/"
   description = "My example policy"
 
@@ -142,6 +144,15 @@ module "iam_policy" {
           "rds-db:connect"
         ]
         Resource = module.db.db_instance_arn
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kafka-cluster:*Topic*",
+          "kafka-cluster:WriteData",
+          "kafka-cluster:ReadData"
+        ]
+        Resource = module.msk_cluster.arn
       }
     ]
   })
@@ -154,7 +165,7 @@ module "iam_assumable_role" {
 
   create_role = true
 
-  role_name         = "debezium"
+  role_name         = local.name
   role_requires_mfa = false
 
   custom_role_policy_arns = [
@@ -207,7 +218,7 @@ resource "aws_mskconnect_connector" "debezium_mysql" {
 
       vpc {
         security_groups = [module.security_group.security_group_id]
-        subnets         = module.vpc.public_subnets
+        subnets         = module.vpc.private_subnets
       }
     }
   }
@@ -224,6 +235,15 @@ resource "aws_mskconnect_connector" "debezium_mysql" {
     custom_plugin {
       arn      = module.msk_cluster.connect_custom_plugins.debezium.arn
       revision = module.msk_cluster.connect_custom_plugins.debezium.latest_revision
+    }
+  }
+
+  log_delivery {
+    worker_log_delivery {
+      s3 {
+        enabled = true
+        bucket  = module.s3_bucket.s3_bucket_id
+      }
     }
   }
 
@@ -264,7 +284,8 @@ module "security_group" {
   ingress_cidr_blocks = module.vpc.private_subnets_cidr_blocks
   ingress_rules = [
     "kafka-broker-tcp",
-    "kafka-broker-tls-tcp"
+    "kafka-broker-tls-tcp",
+    "all-all"
   ]
 
   tags = local.tags
