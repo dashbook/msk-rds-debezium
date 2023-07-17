@@ -205,26 +205,27 @@ resource "aws_mskconnect_connector" "debezium_mysql" {
   }
 
   connector_configuration = {
-    "name"                                          = local.name
-    "connector.class"                               = "io.debezium.connector.mysql.MySqlConnector"
-    "database.hostname"                             = module.db.db_instance_address
-    "database.port"                                 = 3306
-    "database.user"                                 = module.db.db_instance_username
-    "database.password"                             = aws_secretsmanager_secret_version.current.secret_string
-    "database.server_name"                          = module.db.db_instance_name
-    "database.history.kafka.bootstrap.servers"      = module.msk_cluster.bootstrap_brokers_tls
-    "database.history.kafka.topic"                  = "dbhistory.debezium"
-    "key.converter"                                 = "com.amazonaws.services.schemaregistry.kafkaconnect.AWSKafkaAvroConverter"
-    "value.converter"                               = "com.amazonaws.services.schemaregistry.kafkaconnect.AWSKafkaAvroConverter"
-    "key.converter.region"                          = local.region
-    "value.converter.region"                        = local.region
-    "key.converter.registry.name"                   = module.msk_cluster.schema_registries.debezium.registry_name
-    "value.converter.registry.name"                 = module.msk_cluster.schema_registries.debezium.registry_name
-    "key.converter.compatibility"                   = "FORWARD"
-    "value.converter.compatibility"                 = "FORWARD"
-    "key.converter.schemaAutoRegistrationEnabled"   = true
-    "value.converter.schemaAutoRegistrationEnabled" = true
-    "tasks.max"                                     = 1
+    "name"                                            = local.name
+    "connector.class"                                 = "io.debezium.connector.mysql.MySqlConnector"
+    "database.hostname"                               = module.db.db_instance_address
+    "database.port"                                   = 3306
+    "database.user"                                   = module.db.db_instance_username
+    "database.password"                               = aws_secretsmanager_secret_version.current.secret_string
+    "database.server_name"                            = module.db.db_instance_name
+    "database.include.list"                           = "completeMysql"
+    "schema.history.internal.kafka.bootstrap.servers" = module.msk_cluster.bootstrap_brokers_tls
+    "schema.history.internal.kafka.topic"             = "schema-changes"
+    "key.converter"                                   = "com.amazonaws.services.schemaregistry.kafkaconnect.AWSKafkaAvroConverter"
+    "value.converter"                                 = "com.amazonaws.services.schemaregistry.kafkaconnect.AWSKafkaAvroConverter"
+    "key.converter.region"                            = local.region
+    "value.converter.region"                          = local.region
+    "key.converter.registry.name"                     = module.msk_cluster.schema_registries.debezium.registry_name
+    "value.converter.registry.name"                   = module.msk_cluster.schema_registries.debezium.registry_name
+    "key.converter.compatibility"                     = "FORWARD"
+    "value.converter.compatibility"                   = "FORWARD"
+    "key.converter.schemaAutoRegistrationEnabled"     = true
+    "value.converter.schemaAutoRegistrationEnabled"   = true
+    "tasks.max"                                       = 1
   }
 
   kafka_cluster {
