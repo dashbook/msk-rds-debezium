@@ -100,7 +100,7 @@ module "msk_cluster" {
       s3_object_version = aws_s3_object.debezium_connector.version_id
 
       timeouts = {
-        create = "20m"
+        create = "3m"
       }
     }
   }
@@ -128,10 +128,10 @@ module "msk_cluster" {
 # IAM Role
 ################################################################################
 
-module "iam_policy" {
+module "iam_policy_database" {
   source = "terraform-aws-modules/iam/aws//modules/iam-policy"
 
-  name        = local.name
+  name        = "${local.name}_database"
   path        = "/"
   description = "My example policy"
 
@@ -144,7 +144,21 @@ module "iam_policy" {
           "rds-db:connect"
         ]
         Resource = module.db.db_instance_arn
-      },
+      }
+    ]
+  })
+}
+
+module "iam_policy_kafka" {
+  source = "terraform-aws-modules/iam/aws//modules/iam-policy"
+
+  name        = "${local.name}_kafka"
+  path        = "/"
+  description = "My example policy"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
       {
         Effect = "Allow"
         Action = [
@@ -169,9 +183,10 @@ module "iam_assumable_role" {
   role_requires_mfa = false
 
   custom_role_policy_arns = [
-    module.iam_policy.arn,
+    module.iam_policy_database.arn,
+    module.iam_policy_kafka.arn,
   ]
-  number_of_custom_role_policy_arns = 1
+  number_of_custom_role_policy_arns = 2
 }
 
 ################################################################################
@@ -284,9 +299,10 @@ module "security_group" {
   ingress_cidr_blocks = module.vpc.private_subnets_cidr_blocks
   ingress_rules = [
     "kafka-broker-tcp",
-    "kafka-broker-tls-tcp",
-    "all-all"
+    "kafka-broker-tls-tcp"
   ]
+  ingress_with_self = [{ "rule" : "all-all" }]
+  egress_rules      = ["all-all"]
 
   tags = local.tags
 }
